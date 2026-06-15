@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>短信</title>
+  <link rel="stylesheet" href="/layui.css" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/layui.js"></script>
+  <script src="/app.js"></script>
+</head>
+
+<body>
+  <div class="layui-tab" lay-filter="sms-tabs">
+    <ul class="layui-tab-title">
+      <li lay-id="send">发短信</li>
+      <li class="layui-this" lay-id="in">收件箱</li>
+      <li lay-id="out">已发送</li>
+    </ul>
+
+    <div class="layui-tab-content">
+      <div class="layui-tab-item">
+        <div class="send-row">
+          <label for="ToNumInput">收件人：</label>
+          <br /><br />
+          <input id="ToNumInput" type="text" class="layui-input phone-input" />
+          <button id="sendSMSBtn" class="layui-btn">发送</button>
+        </div>
+        <div>
+          <label for="Text_Content">发送内容：</label>
+          <br /><br />
+          <textarea id="Text_Content" class="layui-textarea sms-textarea"></textarea>
+        </div>
+      </div>
+
+      <div class="layui-tab-item layui-show">
+        <button class="layui-btn layui-btn-danger" id="deleteInboxSelected">删除</button>
+        <button class="layui-btn layui-btn-danger" id="clearInbox">清空</button>
+        <button class="layui-btn" id="refreshInbox">刷新</button>
+
+        <br /><br />
+        <div class="sms-info">
+          <span id="inCount">条数: 0</span>
+          <span id="inPages">页数: 0</span>
+          <span id="inLimit">每页: 10</span>
+        </div>
+        <table id="inTable" lay-filter="inTable"></table>
+        <hr />
+        <div class="pagination">
+          <button id="inPrevPage" class="layui-btn" disabled>上一页</button>
+          <button id="inNextPage" class="layui-btn">下一页</button>
+          <select id="inPageSelect" class="layui-select page-select"></select>
+          <select id="inLimitSelect" class="layui-select limit-select">
+            <option value="10">10条/页</option>
+            <option value="25">25条/页</option>
+            <option value="50">50条/页</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="layui-tab-item">
+        <button class="layui-btn layui-btn-danger" id="deleteSentSelected">删除</button>
+        <button class="layui-btn layui-btn-danger" id="clearSent">清空</button>
+        <button class="layui-btn" id="refreshSent">刷新</button>
+
+        <br /><br />
+        <div class="sms-info">
+          <span id="outCount">条数: 0</span>
+          <span id="outPages">页数: 0</span>
+          <span id="outLimit">每页: 10</span>
+        </div>
+        <table id="outTable" lay-filter="outTable"></table>
+        <hr />
+        <div class="pagination">
+          <button id="outPrevPage" class="layui-btn" disabled>上一页</button>
+          <button id="outNextPage" class="layui-btn">下一页</button>
+          <select id="outPageSelect" class="layui-select page-select"></select>
+          <select id="outLimitSelect" class="layui-select limit-select">
+            <option value="10">10条/页</option>
+            <option value="25">25条/页</option>
+            <option value="50">50条/页</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+
+</html>
