@@ -1,0 +1,10 @@
+{
+  "listenHost": "0.0.0.0",
+  "listenPort": 18080,
+  "token": "",
+  "deviceBaseUrl": "http://192.168.66.1:9527",
+  "dataFile": "notify-messages.jsonl",
+  "feishuEnabled": true,
+  "feishuWebhook": "https://open.feishu.cn/open-apis/bot/v2/hook/a773ff1b-8f11-48f8-b6d2-3bc141f6218d",
+  "feishuOpenId": "ou_647359b1efd137e8a6fe8bcd91281c7e"
+}

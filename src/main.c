@@ -1,5 +1,7 @@
 #include "db.h"
 #include "http.h"
+#include "config.h"
+#include "notify_client.h"
 #include "sms.h"
 #include "util.h"
 
@@ -9,6 +11,7 @@
 
 #define DB_PATH "/home/root/network/messages.db"
 #define HTTP_PORT 9527
+#define USB_READY_DELAY_SECONDS 30
 #define OFONO_SERVICE "org.ofono"
 #define MODEM_PATH "/ril_0"
 #define OFONO_CONNECTION_MANAGER "org.ofono.ConnectionManager"
@@ -54,7 +57,18 @@ static void enable_roaming_allowed(GDBusConnection *bus)
     g_print("set RoamingAllowed=true success.\n");
 }
 
-static gboolean add_http_port_redirect(gpointer user_data)
+static void init_notify_client(void)
+{
+    DeviceConfig config;
+
+    if (config_load(&config)) {
+        notify_client_init(&config);
+    } else {
+        g_printerr("device config load failed; SMS notify disabled.\n");
+    }
+}
+
+static gboolean setup_usb_ready_services(gpointer user_data)
 {
     (void)user_data;
 
@@ -68,6 +82,7 @@ static gboolean add_http_port_redirect(gpointer user_data)
                 HTTP_PORT);
     }
 
+    init_notify_client();
     return G_SOURCE_REMOVE;
 }
 
@@ -113,8 +128,6 @@ int main(void)
     bus = connect_system_bus();
 
     enable_roaming_allowed(bus);
-    add_http_port_redirect(NULL);
-    g_timeout_add_seconds(20, add_http_port_redirect, NULL);
 
     g_print("SMS mode: skip APN activation and data firewall control.\n");
     sms_init(bus);
@@ -122,6 +135,7 @@ int main(void)
 
     loop = g_main_loop_new(NULL, FALSE);
     g_print("network-daemon started.\n");
+    g_timeout_add_seconds(USB_READY_DELAY_SECONDS, setup_usb_ready_services, NULL);
     g_main_loop_run(loop);
 
     http_server_stop();

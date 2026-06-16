@@ -7,9 +7,11 @@ GLIB_DIR = third_party/glib
 
 INCLUDES = -Iinc
 SRCS = src/assets.c \
+       src/config.c \
        src/db.c \
        src/http.c \
        src/main.c \
+       src/notify_client.c \
        src/sms.c \
        src/util.c
 ASSET_DIR = web

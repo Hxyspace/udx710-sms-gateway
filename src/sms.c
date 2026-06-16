@@ -1,6 +1,7 @@
 #include "sms.h"
 
 #include "db.h"
+#include "notify_client.h"
 
 #define OFONO_SERVICE "org.ofono"
 #define MODEM_PATH "/ril_0"
@@ -23,6 +24,7 @@ static void on_incoming_message(
     GVariant *props = NULL;
     GVariant *sender_var = NULL;
     const gchar *sender = "unknown";
+    gint message_id;
 
     (void)connection;
     (void)sender_name;
@@ -42,7 +44,14 @@ static void on_incoming_message(
         sender = g_variant_get_string(sender_var, NULL);
 
     g_print("incoming SMS from %s: %s\n", sender, content ? content : "");
-    db_add_message("in", sender, content ? content : "", "received");
+    message_id = db_add_message("in", sender, content ? content : "", "received");
+    if (message_id > 0) {
+        Message *message = db_get_message(message_id);
+        notify_client_send_message(message);
+        g_free(message);
+    } else {
+        g_printerr("incoming SMS save failed.\n");
+    }
 
     if (sender_var)
         g_variant_unref(sender_var);
