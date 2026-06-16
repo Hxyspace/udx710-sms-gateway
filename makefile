@@ -4,6 +4,7 @@ TARGET = $(OUTDIR)/network-daemon
 CC = aarch64-linux-gnu-gcc
 LD = aarch64-linux-gnu-ld
 GLIB_DIR = third_party/glib
+SQLITE_DIR = third_party/sqlite
 
 INCLUDES = -Iinc
 SRCS = src/assets.c \
@@ -28,13 +29,17 @@ CFLAGS = -O2
 
 INCLUDES += -I$(GLIB_DIR)/include \
             -I$(GLIB_DIR)/include/glib-2.0 \
-            -I$(GLIB_DIR)/lib/glib-2.0/include
+            -I$(GLIB_DIR)/lib/glib-2.0/include \
+            -I$(SQLITE_DIR)/include
 
 LIBS += -L$(GLIB_DIR)/lib
-LIBS += -lgio-2.0 -lgobject-2.0 -lglib-2.0
+LIBS += -L$(SQLITE_DIR)/lib
+LIBS += -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lsqlite3
 
 LDFLAGS = -Wl,-rpath-link=$(GLIB_DIR)/lib \
-          -Wl,--allow-shlib-undefined
+          -Wl,-rpath-link=$(SQLITE_DIR)/lib \
+          -Wl,--allow-shlib-undefined \
+          -s
 
 all: $(TARGET)
 

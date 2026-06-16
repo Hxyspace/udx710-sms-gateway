@@ -53,6 +53,15 @@ make
 build/network-daemon
 ```
 
+设备端短信数据库使用 SQLite C API。项目内携带交叉编译用的 sqlite 头文件和链接库：
+
+```text
+third_party/sqlite/include
+third_party/sqlite/lib
+```
+
+当前设备系统已提供 `libsqlite3.so.0`，部署时不需要额外把项目内 sqlite 动态库放到设备上。
+
 ### 设备端运行
 
 设备上以 root 运行：
@@ -309,7 +318,7 @@ X-Device-Token: <token>
 device_id + message_id
 ```
 
-`inserted=false` 表示电脑端已经收到过这条短信。
+电脑端同步设备历史短信时，如果设备 API 返回的是 `id`，会映射为 `message_id`。`inserted=false` 表示电脑端已经收到过这条短信。
 
 ## 电脑端 API
 
@@ -440,7 +449,7 @@ POST /api/sync/device?direction=in&page=1&page_size=50
 内容：短信内容
 ```
 
-后续设计飞书卡片时，建议以电脑端收到的 `SmsMessage` 为输入：
+后续设计飞书卡片时，建议以电脑端收到的短信 JSON 为输入。当前电脑端保存固定字段，并补充 `received_at`：
 
 ```ts
 type SmsMessage = {

@@ -2,44 +2,12 @@
 
 #include <errno.h>
 #include <gio/gio.h>
-#include <stdio.h>
+#include <sqlite3.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/wait.h>
 
 static gchar db_path[256] = "/home/root/network/messages.db";
+static sqlite3 *db = NULL;
 static GMutex db_mutex;
-
-static gchar *sql_escape(const gchar *src)
-{
-    GString *out = g_string_new("");
-
-    for (const gchar *p = src ? src : ""; *p; p++) {
-        if (*p == '\'')
-            g_string_append(out, "''");
-        else
-            g_string_append_c(out, *p);
-    }
-
-    return g_string_free(out, FALSE);
-}
-
-static gchar *hex_decode_alloc(const gchar *hex)
-{
-    gsize len = hex ? strlen(hex) : 0;
-    gchar *out = g_malloc0(len / 2 + 1);
-    gsize j = 0;
-
-    for (gsize i = 0; i + 1 < len; i += 2) {
-        guint byte = 0;
-        if (sscanf(hex + i, "%2x", &byte) != 1)
-            break;
-        out[j++] = (gchar)byte;
-    }
-
-    out[j] = '\0';
-    return out;
-}
 
 static const gchar *normalize_direction(const gchar *direction)
 {
@@ -50,67 +18,92 @@ static const gchar *normalize_direction(const gchar *direction)
     return NULL;
 }
 
-static gboolean sqlite_run(const gchar *sql, gchar **stdout_out)
+static gboolean db_exec(const gchar *sql)
 {
-    gchar *argv[] = { "sqlite3", db_path, (gchar *)sql, NULL };
-    gchar *stdout_buf = NULL;
-    gchar *stderr_buf = NULL;
-    GError *error = NULL;
-    gint status = 0;
-    gboolean ok;
+    gchar *error = NULL;
+    gint rc = sqlite3_exec(db, sql, NULL, NULL, &error);
 
-    if (stdout_out)
-        *stdout_out = NULL;
+    if (rc != SQLITE_OK) {
+        g_printerr("sqlite exec failed: %s\n", error ? error : sqlite3_errmsg(db));
+        sqlite3_free(error);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static gboolean prepare_stmt(const gchar *sql, sqlite3_stmt **stmt)
+{
+    gint rc = sqlite3_prepare_v2(db, sql, -1, stmt, NULL);
+
+    if (rc != SQLITE_OK) {
+        g_printerr("sqlite prepare failed: %s\n", sqlite3_errmsg(db));
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static void fill_message_from_stmt(Message *msg, sqlite3_stmt *stmt)
+{
+    const guchar *text;
+
+    msg->id = sqlite3_column_int(stmt, 0);
+
+    text = sqlite3_column_text(stmt, 1);
+    g_strlcpy(msg->direction, text ? (const gchar *)text : "", sizeof(msg->direction));
+
+    text = sqlite3_column_text(stmt, 2);
+    g_strlcpy(msg->phone, text ? (const gchar *)text : "", sizeof(msg->phone));
+
+    text = sqlite3_column_text(stmt, 3);
+    g_strlcpy(msg->content, text ? (const gchar *)text : "", sizeof(msg->content));
+
+    msg->timestamp = (time_t)sqlite3_column_int64(stmt, 4);
+
+    text = sqlite3_column_text(stmt, 5);
+    g_strlcpy(msg->status, text ? (const gchar *)text : "", sizeof(msg->status));
+}
+
+static GPtrArray *query_messages(
+    const gchar *sql,
+    const gchar *direction,
+    gint page_size,
+    gint offset)
+{
+    GPtrArray *messages = g_ptr_array_new_with_free_func(g_free);
+    sqlite3_stmt *stmt = NULL;
+    gint bind_index = 1;
 
     g_mutex_lock(&db_mutex);
-    ok = g_spawn_sync(
-            NULL,
-            argv,
-            NULL,
-            G_SPAWN_SEARCH_PATH,
-            NULL,
-            NULL,
-            stdout_out ? &stdout_buf : NULL,
-            &stderr_buf,
-            &status,
-            &error);
+    if (!prepare_stmt(sql, &stmt)) {
+        g_mutex_unlock(&db_mutex);
+        return messages;
+    }
+
+    if (direction)
+        sqlite3_bind_text(stmt, bind_index++, direction, -1, SQLITE_STATIC);
+    if (page_size > 0)
+        sqlite3_bind_int(stmt, bind_index++, page_size);
+    if (offset >= 0)
+        sqlite3_bind_int(stmt, bind_index++, offset);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        Message *msg = g_new0(Message, 1);
+        fill_message_from_stmt(msg, stmt);
+        g_ptr_array_add(messages, msg);
+    }
+
+    sqlite3_finalize(stmt);
     g_mutex_unlock(&db_mutex);
-
-    if (!ok) {
-        g_printerr("sqlite3 failed: %s\n", error ? error->message : "unknown");
-        if (error)
-            g_error_free(error);
-        g_free(stderr_buf);
-        return FALSE;
-    }
-
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        g_printerr("sqlite3 sql failed: %s\n", stderr_buf ? stderr_buf : sql);
-        g_free(stdout_buf);
-        g_free(stderr_buf);
-        return FALSE;
-    }
-
-    if (stdout_out)
-        *stdout_out = stdout_buf;
-    else
-        g_free(stdout_buf);
-    g_free(stderr_buf);
-    return TRUE;
+    return messages;
 }
 
 gboolean db_init(const gchar *path)
 {
     gchar *dir;
-    const gchar *schema =
-        "CREATE TABLE IF NOT EXISTS messages ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "direction TEXT NOT NULL,"
-        "phone TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "timestamp INTEGER NOT NULL,"
-        "status TEXT DEFAULT 'ok'"
-        ");";
+    gint rc;
+    gboolean ok;
 
     if (path && *path)
         g_strlcpy(db_path, path, sizeof(db_path));
@@ -126,7 +119,40 @@ gboolean db_init(const gchar *path)
     }
     g_free(dir);
 
-    return sqlite_run(schema, NULL);
+    g_mutex_lock(&db_mutex);
+    if (db) {
+        g_mutex_unlock(&db_mutex);
+        return TRUE;
+    }
+
+    rc = sqlite3_open(db_path, &db);
+    if (rc != SQLITE_OK) {
+        g_printerr("sqlite open %s failed: %s\n",
+                db_path,
+                db ? sqlite3_errmsg(db) : "unknown");
+        if (db) {
+            sqlite3_close(db);
+            db = NULL;
+        }
+        g_mutex_unlock(&db_mutex);
+        return FALSE;
+    }
+
+    sqlite3_busy_timeout(db, 3000);
+    ok = db_exec(
+            "CREATE TABLE IF NOT EXISTS messages ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "direction TEXT NOT NULL,"
+            "phone TEXT NOT NULL,"
+            "content TEXT NOT NULL,"
+            "timestamp INTEGER NOT NULL,"
+            "status TEXT DEFAULT 'ok'"
+            ");"
+            "CREATE INDEX IF NOT EXISTS idx_msg_dir_id "
+            "ON messages(direction, id DESC);");
+
+    g_mutex_unlock(&db_mutex);
+    return ok;
 }
 
 gint db_add_message(
@@ -135,78 +161,33 @@ gint db_add_message(
     const gchar *content,
     const gchar *status)
 {
-    gchar *safe_direction = sql_escape(direction);
-    gchar *safe_phone = sql_escape(phone);
-    gchar *safe_content = sql_escape(content);
-    gchar *safe_status = sql_escape(status);
-    gchar *sql;
-    gchar *output = NULL;
+    sqlite3_stmt *stmt = NULL;
     gint id = 0;
 
-    sql = g_strdup_printf(
-            "INSERT INTO messages (direction, phone, content, timestamp, status) "
-            "VALUES ('%s', '%s', '%s', %ld, '%s'); "
-            "SELECT last_insert_rowid();",
-            safe_direction,
-            safe_phone,
-            safe_content,
-            (long)time(NULL),
-            safe_status);
-
-    if (sqlite_run(sql, &output) && output)
-        id = atoi(output);
-
-    g_free(output);
-    g_free(sql);
-    g_free(safe_direction);
-    g_free(safe_phone);
-    g_free(safe_content);
-    g_free(safe_status);
-    return id;
-}
-
-static void append_message_rows(GPtrArray *messages, const gchar *output)
-{
-    gchar **lines;
-
-    if (!output || !*output)
-        return;
-
-    lines = g_strsplit(output, "\n", -1);
-    for (gint i = 0; lines[i]; i++) {
-        gchar **fields;
-        Message *msg;
-        gchar *phone;
-        gchar *content;
-
-        if (!*lines[i])
-            continue;
-
-        fields = g_strsplit(lines[i], "|", 6);
-        if (!fields[0] || !fields[1] || !fields[2] ||
-                !fields[3] || !fields[4] || !fields[5]) {
-            g_strfreev(fields);
-            continue;
-        }
-
-        phone = hex_decode_alloc(fields[2]);
-        content = hex_decode_alloc(fields[3]);
-        msg = g_new0(Message, 1);
-        msg->id = atoi(fields[0]);
-        g_strlcpy(msg->direction, fields[1], sizeof(msg->direction));
-        g_strlcpy(msg->phone, phone, sizeof(msg->phone));
-        g_strlcpy(msg->content, content, sizeof(msg->content));
-        msg->timestamp = (time_t)atol(fields[4]);
-        g_strlcpy(msg->status, fields[5], sizeof(msg->status));
-
-        g_ptr_array_add(messages, msg);
-
-        g_free(phone);
-        g_free(content);
-        g_strfreev(fields);
+    g_mutex_lock(&db_mutex);
+    if (!prepare_stmt(
+                "INSERT INTO messages "
+                "(direction, phone, content, timestamp, status) "
+                "VALUES (?, ?, ?, ?, ?);",
+                &stmt)) {
+        g_mutex_unlock(&db_mutex);
+        return 0;
     }
 
-    g_strfreev(lines);
+    sqlite3_bind_text(stmt, 1, direction ? direction : "", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, phone ? phone : "", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, content ? content : "", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 4, (sqlite3_int64)time(NULL));
+    sqlite3_bind_text(stmt, 5, status ? status : "ok", -1, SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) == SQLITE_DONE)
+        id = (gint)sqlite3_last_insert_rowid(db);
+    else
+        g_printerr("sqlite insert message failed: %s\n", sqlite3_errmsg(db));
+
+    sqlite3_finalize(stmt);
+    g_mutex_unlock(&db_mutex);
+    return id;
 }
 
 GPtrArray *db_get_messages_page(
@@ -214,10 +195,7 @@ GPtrArray *db_get_messages_page(
     gint page,
     gint page_size)
 {
-    GPtrArray *messages = g_ptr_array_new_with_free_func(g_free);
     const gchar *normalized_direction = normalize_direction(direction);
-    gchar *sql;
-    gchar *output = NULL;
     gint offset;
 
     if (page < 1)
@@ -227,33 +205,21 @@ GPtrArray *db_get_messages_page(
     offset = (page - 1) * page_size;
 
     if (normalized_direction) {
-        sql = g_strdup_printf(
-                "SELECT id || '|' || direction || '|' || hex(phone) || '|' || "
-                "hex(content) || '|' || timestamp || '|' || status "
-                "FROM messages WHERE direction='%s' "
-                "ORDER BY id DESC LIMIT %d OFFSET %d;",
+        return query_messages(
+                "SELECT id, direction, phone, content, timestamp, status "
+                "FROM messages WHERE direction=? "
+                "ORDER BY id DESC LIMIT ? OFFSET ?;",
                 normalized_direction,
                 page_size,
                 offset);
-    } else {
-        sql = g_strdup_printf(
-                "SELECT id || '|' || direction || '|' || hex(phone) || '|' || "
-                "hex(content) || '|' || timestamp || '|' || status "
-                "FROM messages ORDER BY id DESC LIMIT %d OFFSET %d;",
-                page_size,
-                offset);
     }
 
-    if (!sqlite_run(sql, &output)) {
-        g_free(sql);
-        return messages;
-    }
-
-    append_message_rows(messages, output);
-
-    g_free(output);
-    g_free(sql);
-    return messages;
+    return query_messages(
+            "SELECT id, direction, phone, content, timestamp, status "
+            "FROM messages ORDER BY id DESC LIMIT ? OFFSET ?;",
+            NULL,
+            page_size,
+            offset);
 }
 
 GPtrArray *db_get_messages(gint limit)
@@ -263,143 +229,156 @@ GPtrArray *db_get_messages(gint limit)
 
 GPtrArray *db_get_messages_all(const gchar *direction)
 {
-    GPtrArray *messages = g_ptr_array_new_with_free_func(g_free);
     const gchar *normalized_direction = normalize_direction(direction);
-    gchar *sql;
-    gchar *output = NULL;
 
     if (normalized_direction) {
-        sql = g_strdup_printf(
-                "SELECT id || '|' || direction || '|' || hex(phone) || '|' || "
-                "hex(content) || '|' || timestamp || '|' || status "
-                "FROM messages WHERE direction='%s' ORDER BY id DESC;",
-                normalized_direction);
-    } else {
-        sql = g_strdup(
-                "SELECT id || '|' || direction || '|' || hex(phone) || '|' || "
-                "hex(content) || '|' || timestamp || '|' || status "
-                "FROM messages ORDER BY id DESC;");
+        return query_messages(
+                "SELECT id, direction, phone, content, timestamp, status "
+                "FROM messages WHERE direction=? ORDER BY id DESC;",
+                normalized_direction,
+                0,
+                -1);
     }
 
-    if (!sqlite_run(sql, &output)) {
-        g_free(sql);
-        return messages;
-    }
-
-    append_message_rows(messages, output);
-
-    g_free(output);
-    g_free(sql);
-    return messages;
+    return query_messages(
+            "SELECT id, direction, phone, content, timestamp, status "
+            "FROM messages ORDER BY id DESC;",
+            NULL,
+            0,
+            -1);
 }
 
 gint db_count_messages(const gchar *direction)
 {
     const gchar *normalized_direction = normalize_direction(direction);
-    gchar *sql;
-    gchar *output = NULL;
+    sqlite3_stmt *stmt = NULL;
     gint count = 0;
 
-    if (normalized_direction) {
-        sql = g_strdup_printf(
-                "SELECT COUNT(*) FROM messages WHERE direction='%s';",
-                normalized_direction);
-    } else {
-        sql = g_strdup("SELECT COUNT(*) FROM messages;");
+    g_mutex_lock(&db_mutex);
+    if (!prepare_stmt(
+                normalized_direction ?
+                "SELECT COUNT(*) FROM messages WHERE direction=?;" :
+                "SELECT COUNT(*) FROM messages;",
+                &stmt)) {
+        g_mutex_unlock(&db_mutex);
+        return 0;
     }
 
-    if (sqlite_run(sql, &output) && output)
-        count = atoi(output);
+    if (normalized_direction)
+        sqlite3_bind_text(stmt, 1, normalized_direction, -1, SQLITE_STATIC);
 
-    g_free(output);
-    g_free(sql);
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        count = sqlite3_column_int(stmt, 0);
+
+    sqlite3_finalize(stmt);
+    g_mutex_unlock(&db_mutex);
     return count;
 }
 
 Message *db_get_message(gint id)
 {
-    GPtrArray *messages;
+    sqlite3_stmt *stmt = NULL;
     Message *message = NULL;
-    gchar *sql;
-    gchar *output = NULL;
 
     if (id <= 0)
         return NULL;
 
-    messages = g_ptr_array_new();
-    sql = g_strdup_printf(
-            "SELECT id || '|' || direction || '|' || hex(phone) || '|' || "
-            "hex(content) || '|' || timestamp || '|' || status "
-            "FROM messages WHERE id=%d LIMIT 1;",
-            id);
-
-    if (sqlite_run(sql, &output)) {
-        append_message_rows(messages, output);
-        if (messages->len > 0)
-            message = g_ptr_array_index(messages, 0);
+    g_mutex_lock(&db_mutex);
+    if (!prepare_stmt(
+                "SELECT id, direction, phone, content, timestamp, status "
+                "FROM messages WHERE id=? LIMIT 1;",
+                &stmt)) {
+        g_mutex_unlock(&db_mutex);
+        return NULL;
     }
 
-    for (guint i = message ? 1 : 0; i < messages->len; i++)
-        g_free(g_ptr_array_index(messages, i));
-    g_ptr_array_free(messages, TRUE);
-    g_free(output);
-    g_free(sql);
+    sqlite3_bind_int(stmt, 1, id);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        message = g_new0(Message, 1);
+        fill_message_from_stmt(message, stmt);
+    }
+
+    sqlite3_finalize(stmt);
+    g_mutex_unlock(&db_mutex);
     return message;
 }
 
 gboolean db_delete_messages(const gchar *ids_csv)
 {
-    GString *ids = g_string_new("");
+    sqlite3_stmt *stmt = NULL;
     gchar **parts;
-    gchar *sql;
-    gboolean ok;
+    gboolean ok = TRUE;
+    gboolean any = FALSE;
 
-    if (!ids_csv || !*ids_csv) {
-        g_string_free(ids, TRUE);
+    if (!ids_csv || !*ids_csv)
+        return FALSE;
+
+    parts = g_strsplit(ids_csv, ",", -1);
+
+    g_mutex_lock(&db_mutex);
+    if (!db_exec("BEGIN IMMEDIATE;")) {
+        g_mutex_unlock(&db_mutex);
+        g_strfreev(parts);
         return FALSE;
     }
 
-    parts = g_strsplit(ids_csv, ",", -1);
+    if (!prepare_stmt("DELETE FROM messages WHERE id=?;", &stmt)) {
+        db_exec("ROLLBACK;");
+        g_mutex_unlock(&db_mutex);
+        g_strfreev(parts);
+        return FALSE;
+    }
+
     for (gint i = 0; parts[i]; i++) {
         gint id = atoi(parts[i]);
 
         if (id <= 0)
             continue;
 
-        if (ids->len > 0)
-            g_string_append_c(ids, ',');
-        g_string_append_printf(ids, "%d", id);
+        any = TRUE;
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
+        sqlite3_bind_int(stmt, 1, id);
+
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            g_printerr("sqlite delete message failed: %s\n", sqlite3_errmsg(db));
+            ok = FALSE;
+            break;
+        }
     }
+
+    sqlite3_finalize(stmt);
+    db_exec(ok ? "COMMIT;" : "ROLLBACK;");
+    g_mutex_unlock(&db_mutex);
     g_strfreev(parts);
-
-    if (ids->len == 0) {
-        g_string_free(ids, TRUE);
-        return FALSE;
-    }
-
-    sql = g_strdup_printf("DELETE FROM messages WHERE id IN (%s);", ids->str);
-    ok = sqlite_run(sql, NULL);
-
-    g_free(sql);
-    g_string_free(ids, TRUE);
-    return ok;
+    return ok && any;
 }
 
 gboolean db_clear_messages(const gchar *direction)
 {
     const gchar *normalized_direction = normalize_direction(direction);
-    gchar *sql;
-    gboolean ok;
+    sqlite3_stmt *stmt = NULL;
+    gboolean ok = FALSE;
 
-    if (normalized_direction) {
-        sql = g_strdup_printf(
-                "DELETE FROM messages WHERE direction='%s';",
-                normalized_direction);
-    } else {
-        sql = g_strdup("DELETE FROM messages;");
+    g_mutex_lock(&db_mutex);
+    if (!prepare_stmt(
+                normalized_direction ?
+                "DELETE FROM messages WHERE direction=?;" :
+                "DELETE FROM messages;",
+                &stmt)) {
+        g_mutex_unlock(&db_mutex);
+        return FALSE;
     }
 
-    ok = sqlite_run(sql, NULL);
-    g_free(sql);
+    if (normalized_direction)
+        sqlite3_bind_text(stmt, 1, normalized_direction, -1, SQLITE_STATIC);
+
+    ok = sqlite3_step(stmt) == SQLITE_DONE;
+    if (!ok)
+        g_printerr("sqlite clear messages failed: %s\n", sqlite3_errmsg(db));
+
+    sqlite3_finalize(stmt);
+    g_mutex_unlock(&db_mutex);
     return ok;
 }
