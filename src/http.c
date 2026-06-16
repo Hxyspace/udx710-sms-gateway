@@ -156,19 +156,24 @@ static void append_message_json(GString *json, const Message *msg)
 static gchar *messages_to_json(const gchar *path)
 {
     gchar *direction = get_query_value(path, "direction");
+    gchar *all_value = get_query_value(path, "all");
     gint page = get_query_int(path, "page", 1);
     gint page_size = get_query_int(path, "page_size", 10);
+    gboolean return_all = g_strcmp0(all_value, "1") == 0 ||
+        g_ascii_strcasecmp(all_value, "true") == 0;
     gint total;
     GPtrArray *messages;
     GString *json;
 
     if (page < 1)
         page = 1;
-    if (page_size <= 0 || page_size > 50)
+    if (page_size <= 0 || page_size > 500)
         page_size = 10;
 
     total = db_count_messages(direction);
-    messages = db_get_messages_page(direction, page, page_size);
+    messages = return_all ?
+        db_get_messages_all(direction) :
+        db_get_messages_page(direction, page, page_size);
     json = g_string_new("{\"items\":[");
 
     for (guint i = 0; i < messages->len; i++) {
@@ -180,11 +185,13 @@ static gchar *messages_to_json(const gchar *path)
 
     g_string_append_printf(
             json,
-            "],\"total\":%d,\"page\":%d,\"page_size\":%d}",
+            "],\"total\":%d,\"page\":%d,\"page_size\":%d,\"all\":%s}",
             total,
             page,
-            page_size);
+            page_size,
+            return_all ? "true" : "false");
     g_ptr_array_free(messages, TRUE);
+    g_free(all_value);
     g_free(direction);
     return g_string_free(json, FALSE);
 }

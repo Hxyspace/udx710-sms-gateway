@@ -129,7 +129,7 @@ gboolean db_init(const gchar *path)
     return sqlite_run(schema, NULL);
 }
 
-gboolean db_add_message(
+gint db_add_message(
     const gchar *direction,
     const gchar *phone,
     const gchar *content,
@@ -140,25 +140,29 @@ gboolean db_add_message(
     gchar *safe_content = sql_escape(content);
     gchar *safe_status = sql_escape(status);
     gchar *sql;
-    gboolean ok;
+    gchar *output = NULL;
+    gint id = 0;
 
     sql = g_strdup_printf(
             "INSERT INTO messages (direction, phone, content, timestamp, status) "
-            "VALUES ('%s', '%s', '%s', %ld, '%s');",
+            "VALUES ('%s', '%s', '%s', %ld, '%s'); "
+            "SELECT last_insert_rowid();",
             safe_direction,
             safe_phone,
             safe_content,
             (long)time(NULL),
             safe_status);
 
-    ok = sqlite_run(sql, NULL);
+    if (sqlite_run(sql, &output) && output)
+        id = atoi(output);
 
+    g_free(output);
     g_free(sql);
     g_free(safe_direction);
     g_free(safe_phone);
     g_free(safe_content);
     g_free(safe_status);
-    return ok;
+    return id;
 }
 
 static void append_message_rows(GPtrArray *messages, const gchar *output)
@@ -218,7 +222,7 @@ GPtrArray *db_get_messages_page(
 
     if (page < 1)
         page = 1;
-    if (page_size <= 0 || page_size > 50)
+    if (page_size <= 0 || page_size > 500)
         page_size = 10;
     offset = (page - 1) * page_size;
 
@@ -255,6 +259,38 @@ GPtrArray *db_get_messages_page(
 GPtrArray *db_get_messages(gint limit)
 {
     return db_get_messages_page(NULL, 1, limit);
+}
+
+GPtrArray *db_get_messages_all(const gchar *direction)
+{
+    GPtrArray *messages = g_ptr_array_new_with_free_func(g_free);
+    const gchar *normalized_direction = normalize_direction(direction);
+    gchar *sql;
+    gchar *output = NULL;
+
+    if (normalized_direction) {
+        sql = g_strdup_printf(
+                "SELECT id || '|' || direction || '|' || hex(phone) || '|' || "
+                "hex(content) || '|' || timestamp || '|' || status "
+                "FROM messages WHERE direction='%s' ORDER BY id DESC;",
+                normalized_direction);
+    } else {
+        sql = g_strdup(
+                "SELECT id || '|' || direction || '|' || hex(phone) || '|' || "
+                "hex(content) || '|' || timestamp || '|' || status "
+                "FROM messages ORDER BY id DESC;");
+    }
+
+    if (!sqlite_run(sql, &output)) {
+        g_free(sql);
+        return messages;
+    }
+
+    append_message_rows(messages, output);
+
+    g_free(output);
+    g_free(sql);
+    return messages;
 }
 
 gint db_count_messages(const gchar *direction)

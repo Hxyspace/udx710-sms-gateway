@@ -1,0 +1,12 @@
+{
+  "name": "network-online-notify-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.ts",
+    "check": "node --check src/index.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
