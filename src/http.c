@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_HEADER_BYTES 8192
+#define MAX_BODY_BYTES (256 * 1024)
+
 static GSocketService *service = NULL;
 
 static void write_response_bytes(
@@ -62,41 +65,61 @@ static gboolean write_asset_response(GOutputStream *out, const gchar *path)
     return TRUE;
 }
 
-static gint parse_content_length(const gchar *headers)
+static gboolean parse_content_length(const gchar *headers, gsize *content_length)
 {
     gchar **lines = g_strsplit(headers, "\r\n", -1);
-    gint content_length = 0;
+    gboolean ok = TRUE;
+
+    *content_length = 0;
 
     for (gint i = 0; lines[i]; i++) {
         if (g_ascii_strncasecmp(lines[i], "Content-Length:", 15) == 0) {
-            content_length = atoi(lines[i] + 15);
+            gchar *end = NULL;
+            guint64 parsed = g_ascii_strtoull(lines[i] + 15, &end, 10);
+            if (end == lines[i] + 15 || parsed > MAX_BODY_BYTES) {
+                ok = FALSE;
+                break;
+            }
+            *content_length = (gsize)parsed;
             break;
         }
     }
 
     g_strfreev(lines);
-    return content_length;
+    return ok;
 }
 
-static gchar *read_request(GInputStream *in)
+static gchar *read_request(GInputStream *in, const gchar **error_status)
 {
     GString *request = g_string_new("");
     gchar buf[2048];
     gssize nread;
     gchar *header_end = NULL;
-    gint content_length = 0;
+    gsize content_length = 0;
+
+    *error_status = NULL;
 
     while ((nread = g_input_stream_read(in, buf, sizeof(buf), NULL, NULL)) > 0) {
         g_string_append_len(request, buf, nread);
         header_end = strstr(request->str, "\r\n\r\n");
         if (header_end) {
             gsize header_len = (header_end - request->str) + 4;
-            content_length = parse_content_length(request->str);
-            if (request->len >= header_len + (gsize)content_length)
+            if (header_len > MAX_HEADER_BYTES ||
+                    !parse_content_length(request->str, &content_length)) {
+                *error_status = "413 Payload Too Large";
                 break;
-        }
-        if (request->len > 65536)
+            }
+            if (request->len >= header_len + content_length)
+                break;
+        } else if (request->len > MAX_HEADER_BYTES) {
+            *error_status = "413 Payload Too Large";
             break;
+        }
+
+        if (request->len > MAX_HEADER_BYTES + MAX_BODY_BYTES) {
+            *error_status = "413 Payload Too Large";
+            break;
+        }
     }
 
     return g_string_free(request, FALSE);
@@ -289,13 +312,21 @@ static gboolean on_incoming_connection(
     gchar *method = NULL;
     gchar *path = NULL;
     gchar *body = NULL;
+    const gchar *request_error = NULL;
 
     (void)svc;
     (void)source_object;
     (void)user_data;
 
     g_socket_set_timeout(socket, 5);
-    request = read_request(in);
+    request = read_request(in, &request_error);
+    if (request_error) {
+        write_response(out, request_error, "application/json",
+                "{\"status\":\"error\",\"error\":\"request too large\"}");
+        g_free(request);
+        return TRUE;
+    }
+
     parts = g_strsplit(request, " ", 3);
     if (parts[0] && parts[1]) {
         method = parts[0];

@@ -73,7 +73,12 @@ layui.use(function () {
           minWidth: 260,
           templet: function (d) { return escapeHtml(d.content); }
         },
-        { field: "phone", title: phoneTitle(direction), minWidth: 150 },
+        {
+          field: "phone",
+          title: phoneTitle(direction),
+          minWidth: 150,
+          templet: function (d) { return escapeHtml(d.phone); }
+        },
         {
           field: "timestamp",
           title: "时间",
