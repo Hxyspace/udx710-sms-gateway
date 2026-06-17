@@ -10,8 +10,10 @@ extern const guint8 _binary_web_app_js_start[];
 extern const guint8 _binary_web_app_js_end[];
 extern const guint8 _binary_web_vendor_layui_js_start[];
 extern const guint8 _binary_web_vendor_layui_js_end[];
-extern const guint8 _binary_web_vendor_layui_css_start[];
-extern const guint8 _binary_web_vendor_layui_css_end[];
+extern const guint8 _binary_web_vendor_css_layui_css_start[];
+extern const guint8 _binary_web_vendor_css_layui_css_end[];
+extern const guint8 _binary_web_vendor_font_iconfont_woff2_start[];
+extern const guint8 _binary_web_vendor_font_iconfont_woff2_end[];
 
 #define ASSET_SIZE(start, end) ((gsize)((end) - (start)))
 
@@ -41,9 +43,15 @@ static Asset assets[] = {
         0,
     },
     {
-        "/layui.css",
+        "/vendor/css/layui.css",
         "text/css; charset=utf-8",
-        _binary_web_vendor_layui_css_start,
+        _binary_web_vendor_css_layui_css_start,
+        0,
+    },
+    {
+        "/vendor/font/iconfont.woff2",
+        "font/woff2",
+        _binary_web_vendor_font_iconfont_woff2_start,
         0,
     },
 };
@@ -68,8 +76,11 @@ static void init_asset_sizes(void)
             _binary_web_vendor_layui_js_start,
             _binary_web_vendor_layui_js_end);
     assets[4].size = ASSET_SIZE(
-            _binary_web_vendor_layui_css_start,
-            _binary_web_vendor_layui_css_end);
+            _binary_web_vendor_css_layui_css_start,
+            _binary_web_vendor_css_layui_css_end);
+    assets[5].size = ASSET_SIZE(
+            _binary_web_vendor_font_iconfont_woff2_start,
+            _binary_web_vendor_font_iconfont_woff2_end);
     initialized = TRUE;
 }
 
