@@ -1,5 +1,5 @@
 OUTDIR = build
-TARGET = $(OUTDIR)/network-daemon
+TARGET = $(OUTDIR)/udx710-sms-gateway
 
 CC = aarch64-linux-gnu-gcc
 LD = aarch64-linux-gnu-ld

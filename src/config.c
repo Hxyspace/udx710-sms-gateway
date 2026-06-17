@@ -61,7 +61,7 @@ static gboolean detect_usb_peer_ip(gchar *ip, gsize ip_size)
 static void config_write_template(void)
 {
     const gchar *template_text =
-        "# network-online device config\n"
+        "# UDX710 SMS Gateway device config\n"
         "[device]\n"
         "device_id=udx710\n"
         "notify_enabled=true\n"

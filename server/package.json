@@ -1,5 +1,5 @@
 {
-  "name": "network-online-notify-server",
+  "name": "udx710-sms-gateway-notify-server",
   "private": true,
   "type": "module",
   "scripts": {

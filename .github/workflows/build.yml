@@ -1,0 +1,72 @@
+name: Build UDX710 SMS Gateway
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  TOOLCHAIN_RELEASE_TAG: toolchain-gcc-linaro-7.5.0
+  TOOLCHAIN_ARCHIVE: gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
+  TOOLCHAIN_DIR: gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install base dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make xz-utils file
+
+      - name: Download cross toolchain from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/toolchain"
+          gh release download "$TOOLCHAIN_RELEASE_TAG" \
+            --pattern "$TOOLCHAIN_ARCHIVE" \
+            --dir "$RUNNER_TEMP/toolchain"
+          tar -xf "$RUNNER_TEMP/toolchain/$TOOLCHAIN_ARCHIVE" -C "$RUNNER_TEMP/toolchain"
+          echo "$RUNNER_TEMP/toolchain/$TOOLCHAIN_DIR/bin" >> "$GITHUB_PATH"
+
+      - name: Build device daemon
+        run: |
+          make -B CFLAGS='-O2 -Wall -Wextra'
+          file build/udx710-sms-gateway
+          aarch64-linux-gnu-readelf -d build/udx710-sms-gateway | grep -E 'NEEDED|RPATH|RUNPATH' || true
+          tar czf udx710-sms-gateway-aarch64.tar.gz -C build udx710-sms-gateway
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check notify server
+        working-directory: server
+        run: npm run check
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: udx710-sms-gateway-aarch64
+          path: udx710-sms-gateway-aarch64.tar.gz
+
+      - name: Publish release asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --notes "Automatically built by GitHub Actions for UDX710 communication case devices" \
+            || true
+          gh release upload "${{ github.ref_name }}" udx710-sms-gateway-aarch64.tar.gz --clobber
