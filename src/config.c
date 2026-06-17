@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define CONFIG_DIR "/home/root/network"
+#define CONFIG_DIR "/home/root/sms-gateway"
 #define CONFIG_PATH CONFIG_DIR "/device.conf"
 #define DEFAULT_NOTIFY_HOST "192.168.66.6"
 #define DEFAULT_NOTIFY_PORT 18080
@@ -61,7 +61,7 @@ static gboolean detect_usb_peer_ip(gchar *ip, gsize ip_size)
 static void config_write_template(void)
 {
     const gchar *template_text =
-        "# network-online device config\n"
+        "# UDX710 SMS Gateway device config\n"
         "[device]\n"
         "device_id=udx710\n"
         "notify_enabled=true\n"

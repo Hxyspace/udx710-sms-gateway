@@ -5,7 +5,7 @@
 #include <sqlite3.h>
 #include <stdlib.h>
 
-static gchar db_path[256] = "/home/root/network/messages.db";
+static gchar db_path[256] = "/home/root/sms-gateway/messages.db";
 static sqlite3 *db = NULL;
 static GMutex db_mutex;
 

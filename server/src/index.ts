@@ -211,7 +211,7 @@ async function sendFeishu(message: SmsMessage): Promise<void> {
   const response = await fetch(config.feishuWebhook, {
     method: 'POST',
     headers: {
-      'User-Agent': 'network-online-notify-server',
+      'User-Agent': 'udx710-sms-gateway-notify-server',
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({

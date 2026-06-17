@@ -1,73 +1,129 @@
-# network-online
+# UDX710 SMS Gateway
 
-UDX710 类随身 WiFi 设备的短信服务。设备通过 USB 网卡暴露 `192.168.66.1`，本程序运行在设备内，负责接收/发送短信、提供本地 Web UI，并把收到的短信通过 USB 网卡推送到电脑端服务。
+[![Release](https://img.shields.io/github/v/release/Hxyspace/udx710-sms-gateway)](https://github.com/Hxyspace/udx710-sms-gateway/releases)
+![Platform](https://img.shields.io/badge/platform-UDX710-red.svg)
+![Language](https://img.shields.io/badge/language-C-green.svg)
+![Node](https://img.shields.io/badge/node-20%2B-purple.svg)
+[![Build](https://github.com/Hxyspace/udx710-sms-gateway/actions/workflows/build.yml/badge.svg)](https://github.com/Hxyspace/udx710-sms-gateway/actions/workflows/build.yml)
 
-目标是：设备端不激活 APN、不跑蜂窝数据流量，但能稳定接收短信。
+面向华为通讯壳和 UDX710 方案随身 WiFi 的短信网关。设备通过 USB 网卡暴露 `192.168.66.1`，本程序运行在设备内，提供短信收发、本地 Web UI、设备端 API，并可把收到的短信推送到电脑端服务。
 
-## 组件
+UDX710 是紫光展锐 / Unisoc 方案。当前已在数源科技华为通讯壳 `SY108-658`、`SY108-698`、`SY108-688` 上实测可用；理论上同类 UDX710 随身 WiFi 设备也可以复用这套方案。
 
-### 设备端：`network-daemon`
+项目目标很明确：设备端不激活 APN、不主动跑蜂窝数据流量，同时能稳定收发短信。
 
-运行在嵌入式设备上。
+## 功能
 
-职责：
+- 设备端监听短信并保存到 `/home/root/sms-gateway/messages.db`
+- 设备端提供轻量 Web UI，默认监听 `9527`
+- 设备端提供短信查询、发送、删除、清空 API
+- 设备端自动设置 `setenforce 0`
+- 设备端设置 oFono `RoamingAllowed=true`
+- 设备端启动 30 秒后设置 `80 -> 9527` 端口转发
+- 设备端通过 `usb0` ARP 表识别电脑端 IP，并推送新短信
+- 电脑端 TypeScript 服务接收通知、保存 JSONL、预留飞书 webhook 推送
 
-- 设置 `setenforce 0`
-- 设置 oFono `RoamingAllowed=true`
-- 启动短信监听
-- 保存短信到 `/home/root/network/messages.db`
-- 启动 Web/API 服务，监听 `9527`
-- 30 秒后设置 `80 -> 9527` 转发
-- 30 秒后识别 USB 对端电脑 IP，并初始化短信通知推送
+设备端不会激活 APN，不调用 `ActivatePdp`，也不依赖防火墙 DROP 来阻断数据。
 
-设备端不会：
+## 架构
 
-- 激活 APN
-- 调用 `ActivatePdp`
-- 设置数据链路 DROP 防火墙
-- 主动访问公网
+```
+┌────────────────────┐        USB RNDIS         ┌────────────────────┐
+│  UDX710 device     │  192.168.66.1/usb0       │  Linux PC          │
+│                    │ ───────────────────────> │                    │
+│  udx710-sms-gateway│                          │  notify server     │
+│  Web UI :9527      │                          │  :18080            │
+│  SQLite messages   │                          │  JSONL + Feishu    │
+└────────────────────┘                          └────────────────────┘
+```
 
-### 电脑端：`server/`
+## 目录结构
 
-运行在 Linux 电脑上，用 TypeScript/Node 实现。
+```
+.
+├── src/                    # 设备端 C 守护进程
+├── web/                    # 嵌入到设备端二进制的 Web UI
+├── server/                 # 电脑端 TypeScript 通知服务
+├── third_party/glib        # 设备端 GLib 运行/构建依赖
+├── third_party/sqlite      # 交叉编译用 sqlite 头文件和链接库
+├── docs/device-api.md      # 设备端 HTTP API
+└── .github/workflows       # GitHub Actions 构建
+```
 
-职责：
+## 构建
 
-- 接收设备端推送的短信
-- 本地保存通知记录到 JSONL
-- 提供查看通知记录的 API
-- 代理访问设备端短信 API
-- 预留并实现了最简单的飞书 webhook text 推送
+### 本地构建设备端
 
-## 构建和运行
+需要 `aarch64-linux-gnu-gcc` 在 `PATH` 中。当前使用的交叉编译链是：
 
-### 设备端构建
+```text
+/home/yuan/tools/gcc-linaro/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu
+```
 
 ```sh
+export PATH=/home/yuan/tools/gcc-linaro/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin:$PATH
 make
 ```
 
 输出：
 
 ```text
-build/network-daemon
+build/udx710-sms-gateway
 ```
 
-设备端短信数据库使用 SQLite C API。项目内携带交叉编译用的 sqlite 头文件和链接库：
+设备端短信数据库使用 SQLite C API。项目内携带交叉编译用 sqlite 头文件和链接库，但目标设备系统已提供 `libsqlite3.so.0`，部署时不需要额外复制项目内 sqlite 动态库。
+
+### 构建电脑端服务
+
+要求 Node.js 24 或更高版本。
+
+```sh
+cd server
+npm run check
+npm start
+```
+
+默认监听：
 
 ```text
-third_party/sqlite/include
-third_party/sqlite/lib
+0.0.0.0:18080
 ```
 
-当前设备系统已提供 `libsqlite3.so.0`，部署时不需要额外把项目内 sqlite 动态库放到设备上。
+## GitHub Actions
 
-### 设备端运行
+项目提供 `.github/workflows/build.yml`。push、PR、手动触发和 `v*` tag 都会构建设备端二进制，并检查电脑端 TypeScript 服务语法。
+
+Actions 不把交叉编译链提交进仓库，而是从本仓库 GitHub Release 下载工具链包：
+
+```text
+Release tag: toolchain-gcc-linaro-7.5.0
+Asset name : gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
+```
+
+首次使用前，把本地工具链压缩包上传到该 release：
+
+```sh
+gh release create toolchain-gcc-linaro-7.5.0 \
+  /home/yuan/tools/gcc-linaro/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz \
+  --title "GCC Linaro 7.5.0 aarch64 toolchain" \
+  --notes "Build toolchain for UDX710 communication case SMS gateway"
+```
+
+公开仓库中，不需要额外配置个人 token。workflow 使用 GitHub Actions 自动提供的 `GITHUB_TOKEN` 访问同仓库 release，并在 `v*` tag 时发布构建产物。只有工具链放在另一个私有仓库、或需要跨仓库读写 release 时，才需要额外配置 PAT。
+
+推送 tag 会自动发布 `udx710-sms-gateway-aarch64.tar.gz`：
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+## 设备端运行
 
 设备上以 root 运行：
 
 ```sh
-./network-daemon
+./udx710-sms-gateway
 ```
 
 访问：
@@ -79,35 +135,14 @@ http://192.168.66.1/
 
 其中 `80 -> 9527` 端口转发会在启动后 30 秒设置。
 
-### 电脑端运行
-
-要求 Node.js 24 或更高版本。
-
-```sh
-cd server
-npm start
-```
-
-默认监听：
-
-```text
-0.0.0.0:18080
-```
-
-健康检查：
-
-```sh
-curl http://127.0.0.1:18080/sms/notify/health
-```
-
 ## 配置
 
-### 设备端配置
+### 设备端
 
-路径：
+配置文件：
 
 ```text
-/home/root/network/device.conf
+/home/root/sms-gateway/device.conf
 ```
 
 首次运行会自动生成：
@@ -133,9 +168,9 @@ token=
 1. 配置文件 `notify_port`
 2. 默认 `18080`
 
-### 电脑端配置
+### 电脑端
 
-路径：
+配置文件：
 
 ```text
 server/notify-server.json
@@ -162,119 +197,15 @@ server/notify-server.json
 X-Device-Token: <token>
 ```
 
-当前设备端会从 `/home/root/network/device.conf` 的 `token` 字段读取并发送。
+## API 文档
 
-## 设备端 API
-
-Base URL：
-
-```text
-http://192.168.66.1:9527
-```
-
-### 查询短信列表
-
-```http
-GET /api/messages?direction=in&page=1&page_size=10
-```
-
-参数：
-
-- `direction`: `in` 或 `out`，可省略表示全部
-- `page`: 第几页，从 `1` 开始
-- `page_size`: 每页数量，最大 `500`
-- `all`: `1` 或 `true` 时返回全部，忽略分页切片
-
-响应：
-
-```json
-{
-  "items": [
-    {
-      "id": 12,
-      "direction": "in",
-      "phone": "10086",
-      "content": "短信内容",
-      "timestamp": 1710000000,
-      "status": "received"
-    }
-  ],
-  "total": 1,
-  "page": 1,
-  "page_size": 10,
-  "all": false
-}
-```
-
-### 查询单条短信
-
-```http
-GET /api/message?id=12
-```
-
-响应：
-
-```json
-{
-  "id": 12,
-  "direction": "in",
-  "phone": "10086",
-  "content": "短信内容",
-  "timestamp": 1710000000,
-  "status": "received"
-}
-```
-
-### 发送短信
-
-```http
-POST /api/send
-Content-Type: application/x-www-form-urlencoded
-
-recipient=13800138000&content=hello
-```
-
-响应：
-
-```json
-{
-  "status": "success",
-  "message": "sent",
-  "path": "/ril_0/message..."
-}
-```
-
-### 删除短信
-
-```http
-POST /api/delete
-Content-Type: application/x-www-form-urlencoded
-
-ids=12,13,14
-```
-
-响应：
-
-```json
-{"status":"success"}
-```
-
-### 清空短信
-
-```http
-POST /api/clear
-Content-Type: application/x-www-form-urlencoded
-
-direction=in
-```
-
-`direction` 只能是 `in` 或 `out`。
-
-响应：
-
-```json
-{"status":"success"}
-```
+- 设备端 API: [docs/device-api.md](docs/device-api.md)
+- 电脑端通知服务:
+  - `GET /sms/notify/health`
+  - `POST /sms/notify`
+  - `GET /api/messages`
+  - `GET /api/device/messages`
+  - `POST /api/sync/device`
 
 ## 设备端推送到电脑端
 
@@ -303,134 +234,11 @@ X-Device-Token: <token>
 }
 ```
 
-电脑端响应：
-
-```json
-{
-  "status": "success",
-  "inserted": true
-}
-```
-
-去重规则：
-
-```text
-device_id + message_id
-```
-
-电脑端同步设备历史短信时，如果设备 API 返回的是 `id`，会映射为 `message_id`。`inserted=false` 表示电脑端已经收到过这条短信。
-
-## 电脑端 API
-
-Base URL：
-
-```text
-http://<电脑USB网卡IP>:18080
-```
-
-### 健康检查
-
-```http
-GET /sms/notify/health
-```
-
-响应：
-
-```json
-{"status":"ok"}
-```
-
-### 接收设备短信通知
-
-```http
-POST /sms/notify
-Content-Type: application/json
-
-{
-  "device_id": "udx710",
-  "message_id": 12,
-  "direction": "in",
-  "phone": "10086",
-  "content": "短信内容",
-  "timestamp": 1710000000,
-  "status": "received"
-}
-```
-
-### 查询电脑端已接收通知
-
-```http
-GET /api/messages?page=1&page_size=10
-```
-
-参数：
-
-- `device_id`: 可选
-- `direction`: 可选
-- `page`: 第几页
-- `page_size`: 每页数量，最大 `500`
-- `all`: `1` 或 `true` 返回全部
-
-响应：
-
-```json
-{
-  "items": [
-    {
-      "device_id": "udx710",
-      "message_id": 12,
-      "direction": "in",
-      "phone": "10086",
-      "content": "短信内容",
-      "timestamp": 1710000000,
-      "status": "received",
-      "received_at": 1710000001
-    }
-  ],
-  "total": 1,
-  "page": 1,
-  "page_size": 10,
-  "all": false
-}
-```
-
-### 代理查询设备端短信
-
-电脑端会访问 `deviceBaseUrl`，默认是 `http://192.168.66.1:9527`。
-
-```http
-GET /api/device/messages?direction=in&page=1&page_size=10
-```
-
-响应格式与设备端 `/api/messages` 一致。
-
-### 从设备端同步短信到电脑端
-
-```http
-POST /api/sync/device?direction=in&page=1&page_size=50
-```
-
-响应：
-
-```json
-{
-  "status": "success",
-  "inserted": 3,
-  "source": {
-    "items": [],
-    "total": 0,
-    "page": 1,
-    "page_size": 50,
-    "all": false
-  }
-}
-```
+电脑端按 `device_id + message_id` 去重。`inserted=false` 表示电脑端已经收到过这条短信。
 
 ## 飞书推送
 
-当前电脑端只实现最小 text webhook 推送，方便后续替换成卡片式交互。
-
-启用：
+电脑端当前只实现最小 text webhook 推送，方便后续替换成卡片式交互。
 
 ```json
 {
@@ -448,28 +256,6 @@ POST /api/sync/device?direction=in&page=1&page_size=50
 时间：2024/3/9 16:00:00
 内容：短信内容
 ```
-
-后续设计飞书卡片时，建议以电脑端收到的短信 JSON 为输入。当前电脑端保存固定字段，并补充 `received_at`：
-
-```ts
-type SmsMessage = {
-  device_id: string;
-  message_id: number;
-  direction: string;
-  phone: string;
-  content: string;
-  timestamp: number;
-  status?: string;
-  received_at?: number;
-};
-```
-
-建议卡片操作可以围绕这些 API 设计：
-
-- 查看单条短信详情：电脑端本地 `device_id + message_id`
-- 拉取设备端最新短信：`GET /api/device/messages`
-- 同步设备端历史短信：`POST /api/sync/device`
-- 后续如果要从飞书回复短信，可调用设备端 `POST /api/send`
 
 ## 调试
 
@@ -489,7 +275,7 @@ device api: http://192.168.66.1:9527
 ```text
 set RoamingAllowed=true success.
 HTTP server listening on 9527.
-network-daemon started.
+udx710-sms-gateway started.
 detected USB notify host: 192.168.66.6
 SMS notify target: http://192.168.66.6:18080/sms/notify
 SMS pushed to notify server: id=12

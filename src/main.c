@@ -9,7 +9,7 @@
 #include <signal.h>
 #include <unistd.h>
 
-#define DB_PATH "/home/root/network/messages.db"
+#define DB_PATH "/home/root/sms-gateway/messages.db"
 #define HTTP_PORT 9527
 #define USB_READY_DELAY_SECONDS 30
 #define OFONO_SERVICE "org.ofono"
@@ -134,7 +134,7 @@ int main(void)
     http_server_start(HTTP_PORT);
 
     loop = g_main_loop_new(NULL, FALSE);
-    g_print("network-daemon started.\n");
+    g_print("udx710-sms-gateway started.\n");
     g_timeout_add_seconds(USB_READY_DELAY_SECONDS, setup_usb_ready_services, NULL);
     g_main_loop_run(loop);
 
