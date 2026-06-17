@@ -21,7 +21,8 @@ ASSETS = $(ASSET_DIR)/index.html \
          $(ASSET_DIR)/styles.css \
          $(ASSET_DIR)/app.js \
          $(ASSET_DIR)/vendor/layui.js \
-         $(ASSET_DIR)/vendor/layui.css
+         $(ASSET_DIR)/vendor/css/layui.css \
+         $(ASSET_DIR)/vendor/font/iconfont.woff2
 
 ASSET_OBJS = $(patsubst $(ASSET_DIR)/%,$(OUTDIR)/assets/%.o,$(ASSETS))
 
