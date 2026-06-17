@@ -75,12 +75,25 @@ build/udx710-sms-gateway
 
 ### 构建电脑端服务
 
-要求 Node.js 24 或更高版本。
+要求 Node.js 20 或更高版本。
 
 ```sh
 cd server
-npm run check
+npm install
+npm run dev
+```
+
+生产运行：
+
+```sh
+npm run build
 npm start
+```
+
+如果使用 GitHub Release 里的 `udx710-sms-notify-server.tar.gz`，解压后直接运行：
+
+```sh
+node index.js
 ```
 
 默认监听：
@@ -91,7 +104,7 @@ npm start
 
 ## GitHub Actions
 
-项目提供 `.github/workflows/build.yml`。push、PR、手动触发和 `v*` tag 都会构建设备端二进制，并检查电脑端 TypeScript 服务语法。
+项目提供 `.github/workflows/build.yml`。push、PR、手动触发和 `v*` tag 都会构建设备端二进制，并构建电脑端 TypeScript 服务。
 
 Actions 不把交叉编译链提交进仓库，而是从本仓库 GitHub Release 下载工具链包：
 
@@ -111,7 +124,10 @@ gh release create toolchain-gcc-linaro-7.5.0 \
 
 公开仓库中，不需要额外配置个人 token。workflow 使用 GitHub Actions 自动提供的 `GITHUB_TOKEN` 访问同仓库 release，并在 `v*` tag 时发布构建产物。只有工具链放在另一个私有仓库、或需要跨仓库读写 release 时，才需要额外配置 PAT。
 
-推送 tag 会自动发布 `udx710-sms-gateway-aarch64.tar.gz`：
+推送 tag 会自动发布两个产物：
+
+- `udx710-sms-gateway-aarch64.tar.gz`：设备端 aarch64 二进制
+- `udx710-sms-notify-server.tar.gz`：电脑端 TypeScript 编译产物，入口为 `index.js`
 
 ```sh
 git tag v1.0.0

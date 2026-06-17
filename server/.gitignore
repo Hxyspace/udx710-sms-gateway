@@ -1,1 +1,4 @@
+notify-server.json
 notify-messages.jsonl
+dist/
+node_modules/
