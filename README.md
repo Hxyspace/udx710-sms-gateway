@@ -15,11 +15,11 @@ UDX710 是紫光展锐 / Unisoc 方案。当前已在数源科技华为通讯壳
 ## 功能
 
 - 设备端监听短信并保存到 `/home/root/sms-gateway/messages.db`
-- 设备端提供轻量 Web UI，默认监听 `9527`
+- 设备端提供轻量 Web UI，默认监听 `18080`
 - 设备端提供短信查询、发送、删除、清空 API
 - 设备端自动设置 `setenforce 0`
 - 设备端设置 oFono `RoamingAllowed=true`
-- 设备端启动 30 秒后设置 `80 -> 9527` 端口转发
+- 设备端启动 30 秒后设置 `80 -> 18080` 端口转发
 - 设备端通过 `usb0` ARP 表识别电脑端 IP，并推送新短信
 - 电脑端 TypeScript 服务接收通知、保存 JSONL、预留飞书 webhook 推送
 
@@ -32,7 +32,7 @@ UDX710 是紫光展锐 / Unisoc 方案。当前已在数源科技华为通讯壳
 │  UDX710 device     │  192.168.66.1/usb0       │  Linux PC          │
 │                    │ ───────────────────────> │                    │
 │  udx710-sms-gateway│                          │  notify server     │
-│  Web UI :9527      │                          │  :18080            │
+│  Web UI :18080     │                          │  :18080            │
 │  SQLite messages   │                          │  JSONL + Feishu    │
 └────────────────────┘                          └────────────────────┘
 ```
@@ -145,11 +145,11 @@ git push origin v1.0.0
 访问：
 
 ```text
-http://192.168.66.1:9527/
+http://192.168.66.1:18080/
 http://192.168.66.1/
 ```
 
-其中 `80 -> 9527` 端口转发会在启动后 30 秒设置。
+其中 `80 -> 18080` 端口转发会在启动后 30 秒设置。
 
 ## 配置
 
@@ -199,7 +199,7 @@ server/notify-server.json
   "listenHost": "0.0.0.0",
   "listenPort": 18080,
   "token": "",
-  "deviceBaseUrl": "http://192.168.66.1:9527",
+  "deviceBaseUrl": "http://192.168.66.1:18080",
   "dataFile": "notify-messages.jsonl",
   "feishuEnabled": false,
   "feishuWebhook": "",
@@ -279,7 +279,7 @@ X-Device-Token: <token>
 
 ```text
 notify server listening on 0.0.0.0:18080
-device api: http://192.168.66.1:9527
+device api: http://192.168.66.1:18080
 [health] ok
 [notify] received inserted=true device=udx710 message_id=12 phone=10086 content_len=20
 [notify] duplicate device=udx710 message_id=12
@@ -290,7 +290,7 @@ device api: http://192.168.66.1:9527
 
 ```text
 set RoamingAllowed=true success.
-HTTP server listening on 9527.
+HTTP server listening on 18080.
 udx710-sms-gateway started.
 detected USB notify host: 192.168.66.6
 SMS notify target: http://192.168.66.6:18080/sms/notify

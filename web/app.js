@@ -1,4 +1,4 @@
-const baseUrl = "http://" + window.location.hostname + ":9527/";
+const baseUrl = "/";
 
 layui.use(function () {
   var element = layui.element;

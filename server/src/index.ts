@@ -32,7 +32,7 @@ function defaultConfig(): Config {
     listenHost: '0.0.0.0',
     listenPort: 18080,
     token: '',
-    deviceBaseUrl: 'http://192.168.66.1:9527',
+    deviceBaseUrl: 'http://192.168.66.1:18080',
     dataFile: 'notify-messages.jsonl',
     feishuEnabled: false,
     feishuWebhook: '',

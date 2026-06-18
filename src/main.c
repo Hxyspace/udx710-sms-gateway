@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #define DB_PATH "/home/root/sms-gateway/messages.db"
-#define HTTP_PORT 9527
+#define HTTP_PORT 18080
 #define USB_READY_DELAY_SECONDS 30
 #define OFONO_SERVICE "org.ofono"
 #define MODEM_PATH "/ril_0"
@@ -74,9 +74,9 @@ static gboolean setup_usb_ready_services(gpointer user_data)
 
     if (run_command_checked(
                 "iptables -t nat -C PREROUTING -p tcp --dport 80 "
-                "-j REDIRECT --to-port 9527 || "
+                "-j REDIRECT --to-port 18080 || "
                 "iptables -t nat -A PREROUTING -p tcp --dport 80 "
-                "-j REDIRECT --to-port 9527")) {
+                "-j REDIRECT --to-port 18080")) {
         g_print("redirect tcp/%d to tcp/%d success.\n",
                 80,
                 HTTP_PORT);
